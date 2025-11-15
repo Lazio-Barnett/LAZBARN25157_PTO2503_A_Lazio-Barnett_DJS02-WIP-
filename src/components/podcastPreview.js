@@ -1,8 +1,5 @@
 // src/components/PodcastPreview.js
-// DJS02 – Reusable, encapsulated Web Component for a podcast preview.
-// - Stateless: accepts data via attributes or a .data property setter.
-// - Encapsulated: uses Shadow DOM so styles/markup don't leak.
-// - Communicates via a custom event `podcast-select` on click.
+// Adds aria-haspopup="dialog" to indicate the card opens a dialog.
 
 import { DateUtils } from "../utils/DateUtils.js";
 import { GenreService } from "../utils/GenreService.js";
@@ -14,6 +11,7 @@ TEMPLATE_HTML.innerHTML = `
       display: block;
       cursor: pointer;
       user-select: none;
+      outline: none;
     }
     .card {
       background: white;
@@ -24,11 +22,21 @@ TEMPLATE_HTML.innerHTML = `
       height: 100%;
     }
     .card:hover { transform: scale(1.02); }
+    :host(:focus-visible) .card {
+      outline: 3px solid CanvasText;
+      outline-offset: 3px;
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .card { transition: none; }
+      .card:hover { transform: none; }
+    }
     .cover {
       width: 100%;
       height: auto;
       border-radius: 6px;
       display: block;
+      aspect-ratio: 1 / 1;
+      object-fit: cover;
     }
     h3 {
       margin: .5rem 0 .25rem 0;
@@ -63,7 +71,6 @@ TEMPLATE_HTML.innerHTML = `
 
 export class PodcastPreview extends HTMLElement {
   static get observedAttributes() {
-    // reflect-only attributes (stateless)
     return ["pid", "title", "image", "genres", "seasons", "updated"];
   }
 
@@ -83,22 +90,33 @@ export class PodcastPreview extends HTMLElement {
       tags: this.shadowRoot.querySelector(".tags"),
     };
 
-    // Click -> bubble a custom event to the parent app
-    this.$.card.addEventListener("click", () => {
-      this.dispatchEvent(
-        new CustomEvent("podcast-select", {
-          bubbles: true,
-          composed: true, // allow crossing shadow boundary
-          detail: this.value, // normalized shape
-        })
-      );
+    this.$.card.addEventListener("click", () => this._emitSelect());
+
+    this.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        this._emitSelect();
+      }
     });
   }
 
-  /**
-   * A normalized "value" the parent can rely on regardless of whether
-   * attributes or the .data setter was used.
-   */
+  connectedCallback() {
+    if (!this.hasAttribute("tabindex")) this.setAttribute("tabindex", "0");
+    if (!this.hasAttribute("role")) this.setAttribute("role", "button");
+
+    // New: advertise that activation opens a dialog
+    if (!this.hasAttribute("aria-haspopup"))
+      this.setAttribute("aria-haspopup", "dialog");
+
+    this._syncAria();
+    this._render();
+  }
+
+  attributeChangedCallback() {
+    this._syncAria();
+    this._render();
+  }
+
   get value() {
     return {
       id: this.getAttribute("pid") || this._data?.id || "",
@@ -111,10 +129,8 @@ export class PodcastPreview extends HTMLElement {
     };
   }
 
-  /** Allow parent code to set a whole object: el.data = {...} */
   set data(obj) {
     this._data = obj ?? null;
-    // Reflect key fields to attributes so the component stays stateless by contract
     if (obj) {
       this.setAttribute("pid", obj.id ?? "");
       this.setAttribute("title", obj.title ?? "");
@@ -128,15 +144,16 @@ export class PodcastPreview extends HTMLElement {
     }
   }
 
-  attributeChangedCallback() {
-    this._render();
+  _emitSelect() {
+    this.dispatchEvent(
+      new CustomEvent("podcast-select", {
+        bubbles: true,
+        composed: true,
+        detail: this.value,
+      })
+    );
   }
 
-  connectedCallback() {
-    this._render();
-  }
-
-  // ---- private helpers ----
   _readInt(attr) {
     const v = this.getAttribute(attr);
     const n = Number(v);
@@ -144,30 +161,34 @@ export class PodcastPreview extends HTMLElement {
   }
 
   _readGenres() {
-    // Accept: "1,2,3" or "History,Comedy"
     const raw = this.getAttribute("genres");
     if (raw == null) return this._data?.genres ?? [];
     return raw
       .split(",")
       .map((s) => s.trim())
       .filter(Boolean)
-      .map((x) => (isNaN(Number(x)) ? x : Number(x))); // keep numbers as numbers
+      .map((x) => (isNaN(Number(x)) ? x : Number(x)));
+  }
+
+  _syncAria() {
+    const t = this.getAttribute("title") || this._data?.title || "Podcast";
+    const s = this._readInt("seasons");
+    const seasonsLabel = s ? `${s} season${s > 1 ? "s" : ""}` : "";
+    const label = seasonsLabel ? `${t} — ${seasonsLabel}` : t;
+    this.setAttribute("aria-label", label);
   }
 
   _render() {
     const v = this.value;
 
-    // image & title
     this.$.img.src = v.image || "";
     this.$.img.alt = v.title || "Podcast cover";
     this.$.title.textContent = v.title || "";
 
-    // seasons + updated
     const s = Number.isFinite(v.seasons) ? v.seasons : 0;
     this.$.seasons.textContent = s ? `${s} season${s > 1 ? "s" : ""}` : "";
     this.$.updated.textContent = v.updated ? DateUtils.format(v.updated) : "";
 
-    // genres: accept ids or names; resolve ids via GenreService
     const names =
       typeof v.genres?.[0] === "number"
         ? GenreService.getNames(v.genres)
