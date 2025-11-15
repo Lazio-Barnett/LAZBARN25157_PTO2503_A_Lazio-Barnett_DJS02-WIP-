@@ -17,27 +17,34 @@ export const createModal = (() => {
    * @param {Object} podcast - Podcast object.
    */
   function updateContent(podcast) {
-    el("modalImage").src = podcast.image;
-    el("modalTitle").textContent = podcast.title;
-    el("modalDesc").textContent = podcast.description;
+    el("modalImage").src = podcast.image || "";
+    el("modalImage").alt = podcast.title || "Podcast cover";
+    el("modalTitle").textContent = podcast.title || "";
+    el("modalDesc").textContent = podcast.description || "";
 
-    el("modalGenres").innerHTML = GenreService.getNames(podcast.genres)
+    // Resolve genres: support ids or already-resolved names
+    const names =
+      Array.isArray(podcast.genres) && typeof podcast.genres[0] === "number"
+        ? GenreService.getNames(podcast.genres)
+        : podcast.genres || [];
+
+    el("modalGenres").innerHTML = names
       .map((g) => `<span class="tag">${g}</span>`)
       .join("");
 
     el("modalUpdated").textContent = DateUtils.format(podcast.updated);
 
+    // Optional: render seasons list if available in data.js
     const seasonData =
       seasons.find((s) => s.id === podcast.id)?.seasonDetails || [];
     el("seasonList").innerHTML = seasonData
       .map(
         (s, index) => `
           <li class="season-item">
-            <strong class="season-title">Season ${index + 1}: ${
-          s.title
-        }</strong>
+            <strong class="season-title">Season ${index + 1}: ${s.title}</strong>
             <span class="episodes">${s.episodes} episodes</span>
-          </li>`
+          </li>
+        `
       )
       .join("");
   }
